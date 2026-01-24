@@ -1,20 +1,4 @@
--- Versiya: 2.0 (Real-time updates)
--- Sana: 2026-01-22
--- 
--- Ishlatish:
---   psql -U postgres -d voting_bot_db -f migration.sql
--- 
--- ============================================================
 
--- Database yaratish (agar kerak bo'lsa)
--- CREATE DATABASE voting_bot_db;
--- \c voting_bot_db;
-
--- ============================================================
--- 1. JADVALLARNI YARATISH
--- ============================================================
-
--- -------------------- KONKURSLAR JADVALI --------------------
 CREATE TABLE IF NOT EXISTS contests (
     id SERIAL PRIMARY KEY,
     name VARCHAR(255) NOT NULL,
@@ -95,11 +79,6 @@ CREATE TABLE IF NOT EXISTS users (
 COMMENT ON TABLE users IS 'Bot foydalanuvchilari (rate limiting uchun)';
 COMMENT ON COLUMN users.last_action IS 'Oxirgi faollik vaqti (spam himoyasi)';
 
-
--- ============================================================
--- 2. MIGRATSIYA: REAL-TIME UPDATE UCHUN YANGI USTUNLAR
--- ============================================================
-
 -- Contests jadvaliga yangi ustunlar qo'shish
 ALTER TABLE contests 
 ADD COLUMN IF NOT EXISTS channel_chat_id VARCHAR(100);
@@ -116,10 +95,6 @@ ADD COLUMN IF NOT EXISTS posted_message_id INTEGER;
 
 COMMENT ON COLUMN contest_channels.posted_message_id IS 'Har bir kanalga yuborilgan post message ID';
 
-
--- ============================================================
--- 3. INDEXLAR YARATISH
--- ============================================================
 
 CREATE INDEX IF NOT EXISTS idx_votes_contest
 ON votes(contest_id);
@@ -157,11 +132,6 @@ WHERE posted_message_id IS NOT NULL;
 
 CREATE INDEX IF NOT EXISTS idx_users_last_action
 ON users(last_action);
-
-
--- ============================================================
--- 4. YAKUNIY XABAR
--- ============================================================
 
 DO $$ 
 BEGIN

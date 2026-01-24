@@ -26,23 +26,20 @@ logger = logging.getLogger(__name__)
 
 
 class AdminStates(StatesGroup):
-    # Konkurs yaratish
+
     waiting_contest_name = State()
     waiting_contest_image = State()
     waiting_start_date = State()
     waiting_end_date = State()
 
-    # Kanal qo'shish
     waiting_channel_count = State()
     waiting_channel_id = State()
     waiting_channel_name = State()
     waiting_channel_link = State()
 
-    # Nomzodlar qo'shish
     waiting_candidate_count = State()
     waiting_candidate_name = State()
 
-    # Tasdiqlash
     confirm_contest = State()
 
 
@@ -64,11 +61,7 @@ def admin_only(func):
 
     return wrapper
 
-
-# ==================== YORDAMCHI FUNKSIYALAR ====================
-
 def back_inline_keyboard() -> InlineKeyboardBuilder:
-    """⬅️ Orqaga inline tugmasi"""
     kb = InlineKeyboardBuilder()
     kb.button(text="⬅️ Orqaga", callback_data="cancel_contest_creation")
     return kb
@@ -79,9 +72,6 @@ async def return_to_admin_panel(message: Message, state: FSMContext):
     await state.clear()
     text = "❌ <b>Bekor qilindi</b>\n\n👨‍💼 Admin Panel"
     await message.answer(text, reply_markup=admin_menu_keyboard())
-
-
-# ==================== ADMIN PANEL ====================
 
 @router.message(F.text == "👨‍💼 Admin Panel")
 @admin_only
@@ -108,7 +98,6 @@ Xush kelibsiz! Quyidagi amallardan birini tanlang:
 @router.message(F.text == "⬅️ Orqaga")
 @admin_only
 async def back_to_main(message: Message, state: FSMContext):
-    """Orqaga tugmasi - Asosiy menyuga qaytish"""
     await state.clear()
 
     text = """
@@ -125,9 +114,6 @@ Botdan foydalanish uchun quyidagi tugmalardan foydalaning:
 
     await message.answer(text, reply_markup=main_menu_keyboard(True))
     log_user_action(message.from_user.id, message.from_user.username, "BACK_TO_MAIN_MENU")
-
-
-# ==================== KONKURS YARATISH ====================
 
 @router.message(F.text == "➕ Yangi konkurs")
 @admin_only
@@ -147,7 +133,6 @@ Konkurs nomini kiriting:
 @router.callback_query(F.data == "cancel_contest_creation")
 @admin_only
 async def cancel_contest_creation(callback: CallbackQuery, state: FSMContext):
-    """Konkurs yaratishni bekor qilish"""
     await callback.answer("Bekor qilindi")
     await callback.message.delete()
     await return_to_admin_panel(callback.message, state)
@@ -159,7 +144,6 @@ async def process_contest_name(message: Message, state: FSMContext):
     """Konkurs nomini saqlash"""
     await state.update_data(contest_name=message.text)
 
-    # YANGI: Tavsifni so'ramaslik - to'g'ridan-to'g'ri rasmga
     text = """
 🖼 Konkurs rasmini yuboring:
 (JPG, PNG format)
@@ -335,24 +319,15 @@ Kanal ID yoki username ni kiriting:
 @router.message(AdminStates.waiting_channel_id)
 @admin_only
 async def process_channel_id(message: Message, state: FSMContext):
-    """
-    Kanal ID ni tekshirish va to'g'ri NUMERIC ID ni olish
-
-    Bot faqat NUMERIC ID bilan ishlaydi: -1001234567890
-    Username (@kanal) ishlamaydi get_chat_member da
-    """
     channel_input = message.text.strip()
 
     try:
-        # Kanal haqida ma'lumot olish
         chat = await message.bot.get_chat(channel_input)
 
-        # NUMERIC ID ni olish (bu har doim ishlaydi)
         numeric_id = chat.id
 
         logger.info(f"Kanal topildi: {chat.title}, ID: {numeric_id}, Type: {chat.type}")
 
-        # Faqat channel yoki supergroup ekanini tekshirish
         if chat.type not in ['channel', 'supergroup']:
             kb = back_inline_keyboard()
             await message.answer(
@@ -362,13 +337,11 @@ async def process_channel_id(message: Message, state: FSMContext):
             )
             return
 
-        # NUMERIC ID ni saqlash (STRING formatda - database VARCHAR)
         await state.update_data(
-            temp_channel_id=str(numeric_id),  # ✅ INT → STR
-            temp_channel_title=chat.title  # Avtomatik nom
+            temp_channel_id=str(numeric_id),
+            temp_channel_title=chat.title
         )
 
-        # Nomni tasdiqlash yoki o'zgartirish
         text = f"""
 ✅ Kanal topildi!
 
@@ -399,11 +372,9 @@ Nom kiriting (yoki /skip nom o'zgarmaydi):
 @router.message(AdminStates.waiting_channel_name)
 @admin_only
 async def process_channel_name(message: Message, state: FSMContext):
-    """Kanal nomini saqlash yoki avtomatik nomni qoldirish"""
     data = await state.get_data()
 
     if message.text.strip() == "/skip":
-        # Avtomatik nom (chat.title)
         channel_name = data.get('temp_channel_title', 'Kanal')
     else:
         # Custom nom
@@ -438,7 +409,6 @@ async def process_channel_link(message: Message, state: FSMContext):
     data = await state.get_data()
     channels = data.get('channels', [])
 
-    # MUHIM: channel_id ni STRING formatda saqlash (database VARCHAR)
     channels.append({
         'id': str(data['temp_channel_id']),  # ✅ INT → STR
         'name': data['temp_channel_name'],
@@ -514,7 +484,6 @@ async def process_candidate_name(message: Message, state: FSMContext, db: Databa
     data = await state.get_data()
     candidates = data.get('candidates', [])
 
-    # To'g'ridan-to'g'ri saqlash (description yo'q)
     candidates.append({
         'name': name,
         'description': None
@@ -526,27 +495,19 @@ async def process_candidate_name(message: Message, state: FSMContext, db: Databa
     await state.update_data(candidates=candidates)
 
     if current < total:
-        # Keyingi nomzodni so'rash
         await ask_candidate_name(message, state, current + 1, total)
     else:
-        # Barcha nomzodlar kiritildi - preview
         await show_contest_preview(message, state, db)
 
 
-# ==================== PREVIEW VA TASDIQLASH ====================
-
 async def show_contest_preview(message: Message, state: FSMContext, db: Database):
-    """
-    Kanalga post qilishdan oldin konkursni ko'rsatish va tasdiqlash
-    """
     data = await state.get_data()
 
-    # Preview matni
     text = f"""
 📋 <b>KONKURS TAYYORLANDI!</b>
 
 <b>📝 Nom:</b> {data['contest_name']}
-<b>🖼 Rasm:</b> {'✅ Bor' if data.get('contest_image') else '❌ Yo\'q'}
+<b>🖼 Rasm:</b> {'✅ Bor' if data.get('contest_image') else "❌ Yo'q"}
 <b>📅 Boshlanish:</b> {data['start_date'].strftime('%d.%m.%Y %H:%M')}
 <b>⏰ Tugash:</b> {data['end_date'].strftime('%d.%m.%Y %H:%M')}
 <b>📢 Kanallar:</b> {len(data.get('channels', []))} ta
@@ -560,13 +521,11 @@ async def show_contest_preview(message: Message, state: FSMContext, db: Database
 
     text += "\n❓ <b>Kanalga post qilishni tasdiqlaysizmi?</b>"
 
-    # Tasdiqlash tugmalari
     kb = InlineKeyboardBuilder()
     kb.button(text="✅ Ha, kanalga post qiling", callback_data="confirm_post_to_channel")
     kb.button(text="❌ Yo'q, bekor qiling", callback_data="cancel_contest_posting")
     kb.adjust(1)
 
-    # Agar rasm bor bo'lsa, rasm bilan ko'rsatish
     if data.get('contest_image'):
         await message.answer_photo(
             photo=data['contest_image'],
@@ -582,24 +541,19 @@ async def show_contest_preview(message: Message, state: FSMContext, db: Database
 @router.callback_query(F.data == "confirm_post_to_channel")
 @admin_only
 async def confirm_post_to_channel(callback: CallbackQuery, state: FSMContext, db: Database):
-    """
-    Kanalga post qilishni tasdiqlash
-    """
+
     await callback.answer("Konkurs yaratilmoqda...", show_alert=True)
 
     data = await state.get_data()
 
     try:
-        # Konkurs yaratish (description yo'q - None)
         contest_id = await db.create_contest(
             name=data['contest_name'],
-            description=None,  # Tavsif yo'q!
+            description=None,
             start_date=data['start_date'],
             end_date=data['end_date'],
             image_file_id=data.get('contest_image')
         )
-
-        # Kanallarni qo'shish
         for channel in data.get('channels', []):
             await db.add_channel_to_contest(
                 contest_id,
@@ -608,7 +562,6 @@ async def confirm_post_to_channel(callback: CallbackQuery, state: FSMContext, db
                 channel['link']
             )
 
-        # Nomzodlarni qo'shish
         for candidate in data['candidates']:
             await db.add_candidate(
                 contest_id,
@@ -616,7 +569,6 @@ async def confirm_post_to_channel(callback: CallbackQuery, state: FSMContext, db
                 candidate['description']
             )
 
-        # Kanalga post qilish VA message_id saqlash
         await post_contest_to_channel(callback.bot, db, contest_id, data)
 
         text = f"""
@@ -633,7 +585,6 @@ async def confirm_post_to_channel(callback: CallbackQuery, state: FSMContext, db
 ✨ Ovozlar soni real-time yangilanadi!
 """
 
-        # Eski xabarni o'chirish
         try:
             await callback.message.delete()
         except:
@@ -642,7 +593,6 @@ async def confirm_post_to_channel(callback: CallbackQuery, state: FSMContext, db
         await callback.message.answer(text)
         await state.clear()
 
-        # Admin panelga qaytish
         await callback.message.answer(
             "👨‍💼 <b>Admin Panel</b>",
             reply_markup=admin_menu_keyboard()
@@ -671,39 +621,27 @@ async def confirm_post_to_channel(callback: CallbackQuery, state: FSMContext, db
 @router.callback_query(F.data == "cancel_contest_posting")
 @admin_only
 async def cancel_contest_posting(callback: CallbackQuery, state: FSMContext):
-    """
-    Kanalga post qilishni bekor qilish
-    """
+
     await callback.answer("Bekor qilindi", show_alert=True)
     await callback.message.delete()
     await state.clear()
 
-    # Admin panelga qaytish
     text = "❌ <b>Konkurs bekor qilindi</b>\n\n👨‍💼 Admin Panel"
     await callback.message.answer(text, reply_markup=admin_menu_keyboard())
 
 
 async def post_contest_to_channel(bot, db: Database, contest_id: int, data: dict):
-    """
-    Konkursni kanalga post qilish
 
-    YANGI: Message ID va Chat ID saqlash - real-time update uchun!
-    """
     try:
-        # Bot username
         bot_info = await bot.get_me()
         bot_username = bot_info.username
 
-        # Nomzodlarni olish (ovoz soni 0 bilan boshlanadi)
         candidates = await db.get_candidates(contest_id)
 
-        # Post matni - SODDA VERSIYA
         post_text = f"🗳 <b>{data['contest_name']}</b>"
 
-        # Inline keyboard - ovozlar soni bilan
         keyboard = vote_keyboard(candidates, contest_id, bot_username)
 
-        # Kanalga yuborish
         sent_message = None
         if data.get('contest_image'):
             sent_message = await bot.send_photo(
@@ -719,7 +657,6 @@ async def post_contest_to_channel(bot, db: Database, contest_id: int, data: dict
                 reply_markup=keyboard
             )
 
-        # YANGI: Message ID va Chat ID saqlash!
         if sent_message:
             await db.save_contest_channel_post(
                 contest_id=contest_id,
@@ -734,12 +671,10 @@ async def post_contest_to_channel(bot, db: Database, contest_id: int, data: dict
         raise
 
 
-# ==================== KONKURSNI TO'XTATISH ====================
 
 @router.message(F.text == "⏸ Konkursni to'xtatish")
 @admin_only
 async def stop_contest_menu(message: Message, db: Database):
-    """AKTIV konkurslarni ko'rsatish va tanlash"""
     contests = await db.get_all_active_contests()
 
     if not contests:
@@ -785,7 +720,6 @@ async def stop_contest_confirm(callback: CallbackQuery, db: Database):
         await callback.message.edit_text("❌ Bu konkurs allaqachon to'xtatilgan")
         return
 
-    # Statistika
     report = await db.get_detailed_report(contest_id)
 
     text = f"""
@@ -819,7 +753,6 @@ Davom etasizmi?
 @router.callback_query(F.data.startswith("yes:stop_contest_exec:"))
 @admin_only
 async def stop_contest_execute(callback: CallbackQuery, db: Database):
-    """Konkursni to'xtatish"""
     await callback.answer()
 
     contest_id = int(callback.data.split(":")[2])
@@ -830,13 +763,9 @@ async def stop_contest_execute(callback: CallbackQuery, db: Database):
         return
 
     try:
-        # Konkursni to'xtatish
         await db.stop_contest(contest['id'])
-
-        # Yakuniy natijalar
         report = await db.get_detailed_report(contest['id'])
 
-        # G'oliblar
         winners_text = ""
         for i, candidate in enumerate(report['candidates'][:3], 1):
             medal = "🥇" if i == 1 else "🥈" if i == 2 else "🥉"
@@ -876,8 +805,6 @@ async def stop_contest_cancel(callback: CallbackQuery):
     await callback.answer("Bekor qilindi")
     await callback.message.delete()
 
-
-# ==================== BOSHQA ADMIN FUNKSIYALARI ====================
 
 @router.message(F.text == "📊 Natijalar")
 @admin_only
@@ -934,7 +861,6 @@ async def detailed_report(message: Message, db: Database):
 @router.message(F.text == "📥 Eksport")
 @admin_only
 async def export_menu(message: Message, db: Database):
-    """Eksport menyu"""
     contests = await db.get_all_contests()
 
     if not contests:
@@ -1032,7 +958,6 @@ async def export_excel(callback: CallbackQuery, db: Database):
 @router.callback_query(F.data.startswith("export:csv:"))
 @admin_only
 async def export_csv(callback: CallbackQuery, db: Database):
-    """CSV eksport"""
     await callback.answer("CSV tayyorlanmoqda...")
 
     contest_id = int(callback.data.split(":")[2])
@@ -1061,7 +986,6 @@ async def export_csv(callback: CallbackQuery, db: Database):
 @router.callback_query(F.data.startswith("export:chart:"))
 @admin_only
 async def export_chart(callback: CallbackQuery, db: Database):
-    """Grafik eksport"""
     await callback.answer("Grafik yaratilmoqda...")
 
     contest_id = int(callback.data.split(":")[2])
@@ -1089,7 +1013,6 @@ async def export_chart(callback: CallbackQuery, db: Database):
 @router.message(F.text == "🗑 Ovozlarni tozalash")
 @admin_only
 async def reset_votes_confirm(message: Message):
-    """Ovozlarni tozalash tasdiq"""
     text = """
 ⚠️ <b>OGOHLANTIRISH!</b>
 
@@ -1138,7 +1061,6 @@ async def reset_votes_cancel(callback: CallbackQuery):
 @router.message(F.text == "📚 Arxiv")
 @admin_only
 async def view_archive(message: Message, db: Database):
-    """Arxivni ko'rish"""
     contests = await db.get_archived_contests()
 
     text = "📚 <b>Arxivlangan konkurslar</b>\n\n"
@@ -1154,7 +1076,6 @@ async def view_archive(message: Message, db: Database):
 @router.callback_query(F.data.startswith("archive:"))
 @admin_only
 async def view_archived_contest(callback: CallbackQuery, db: Database):
-    """Arxivlangan konkurs"""
     await callback.answer()
 
     contest_id = int(callback.data.split(":")[1])
@@ -1186,7 +1107,6 @@ async def view_archived_contest(callback: CallbackQuery, db: Database):
 @router.message(Command("stats"))
 @admin_only
 async def quick_stats(message: Message, db: Database):
-    """Tezkor statistika"""
     contest = await db.get_active_contest()
 
     if not contest:

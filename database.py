@@ -12,7 +12,6 @@ class Database:
         self.pool = None
 
     async def connect(self):
-        """Database ga ulanish - OPTIMIZED CONNECTION POOL"""
         try:
             self.pool = await asyncpg.create_pool(**config.DB_CONFIG)
             await self.create_tables()
@@ -22,9 +21,7 @@ class Database:
             raise
 
     async def create_tables(self):
-        """Jadvallarni yaratish va migratsiya"""
         async with self.pool.acquire() as conn:
-            # Konkurslar jadvali - asosiy jadval
             await conn.execute('''
                 CREATE TABLE IF NOT EXISTS contests (
                     id SERIAL PRIMARY KEY,
@@ -39,8 +36,6 @@ class Database:
                 )
             ''')
 
-            # AVTOMATIK MIGRATSIYA: Yangi ustunlarni qo'shish (agar yo'q bo'lsa)
-            # Bu eski database uchun yangi ustunlarni qo'shadi
             try:
                 await conn.execute('''
                     ALTER TABLE contests 
@@ -71,7 +66,6 @@ class Database:
                 )
             ''')
 
-            # Nomzodlar jadvali
             await conn.execute('''
                 CREATE TABLE IF NOT EXISTS candidates (
                     id SERIAL PRIMARY KEY,
@@ -83,7 +77,6 @@ class Database:
                 )
             ''')
 
-            # Ovozlar jadvali
             await conn.execute('''
                 CREATE TABLE IF NOT EXISTS votes (
                     id SERIAL PRIMARY KEY,
@@ -108,7 +101,6 @@ class Database:
                 )
             ''')
 
-            # PERFORMANCE OPTIMIZATION - Barcha indexlar
             await conn.execute('''
                 -- Votes jadali uchun (eng muhim!)
                 CREATE INDEX IF NOT EXISTS idx_votes_contest ON votes(contest_id);
@@ -132,12 +124,9 @@ class Database:
                 CREATE INDEX IF NOT EXISTS idx_users_last_action ON users(last_action);
             ''')
 
-    # ==================== KONKURS FUNKSIYALARI ====================
-
     async def create_contest(self, name: str, description: str,
                              start_date: datetime, end_date: datetime,
                              image_file_id: str = None) -> int:
-        """Yangi konkurs yaratish"""
         async with self.pool.acquire() as conn:
             row = await conn.fetchrow('''
                 INSERT INTO contests (name, description, image_file_id, start_date, end_date, is_active)
@@ -149,7 +138,6 @@ class Database:
 
     async def add_channel_to_contest(self, contest_id: int, channel_id: str,
                                      channel_name: str, channel_link: str):
-        """Konkursga kanal qo'shish"""
         async with self.pool.acquire() as conn:
             await conn.execute('''
                 INSERT INTO contest_channels (contest_id, channel_id, channel_name, channel_link)
@@ -167,10 +155,6 @@ class Database:
             return row['id']
 
     async def save_contest_channel_post(self, contest_id: int, channel_chat_id: str, message_id: int):
-        """
-        Kanal post ma'lumotlarini saqlash
-        YANGI: Real-time update uchun kerak!
-        """
         async with self.pool.acquire() as conn:
             await conn.execute('''
                 UPDATE contests 
@@ -180,10 +164,7 @@ class Database:
             logger.info(f"Konkurs {contest_id} kanal post saqlandi: {channel_chat_id}:{message_id}")
 
     async def get_contest_channel_post(self, contest_id: int) -> Optional[Dict]:
-        """
-        Kanal post ma'lumotlarini olish
-        YANGI: Post yangilash uchun kerak!
-        """
+
         async with self.pool.acquire() as conn:
             row = await conn.fetchrow('''
                 SELECT channel_chat_id, channel_post_message_id
@@ -198,7 +179,6 @@ class Database:
             return None
 
     async def get_active_contest(self) -> Optional[Dict]:
-        """Faol konkursni olish (birinchisini)"""
         async with self.pool.acquire() as conn:
             row = await conn.fetchrow('''
                 SELECT * FROM contests 
@@ -208,7 +188,6 @@ class Database:
             return dict(row) if row else None
 
     async def get_all_active_contests(self) -> List[Dict]:
-        """Barcha faol konkurslarni olish (to'xtatish uchun)"""
         async with self.pool.acquire() as conn:
             rows = await conn.fetch('''
                 SELECT c.*, 
@@ -223,7 +202,6 @@ class Database:
             return [dict(row) for row in rows]
 
     async def get_all_contests(self) -> List[Dict]:
-        """BARCHA konkurslarni olish (eksport uchun)"""
         async with self.pool.acquire() as conn:
             rows = await conn.fetch('''
                 SELECT c.*, 
@@ -237,7 +215,6 @@ class Database:
             return [dict(row) for row in rows]
 
     async def get_contest_by_id(self, contest_id: int) -> Optional[Dict]:
-        """ID bo'yicha konkursni olish"""
         async with self.pool.acquire() as conn:
             row = await conn.fetchrow('''
                 SELECT * FROM contests WHERE id = $1
@@ -245,7 +222,6 @@ class Database:
             return dict(row) if row else None
 
     async def get_contest_channels(self, contest_id: int) -> List[Dict]:
-        """Konkurs kanallarini olish - OPTIMIZED"""
         async with self.pool.acquire() as conn:
             rows = await conn.fetch('''
                 SELECT * FROM contest_channels 
@@ -255,10 +231,6 @@ class Database:
             return [dict(row) for row in rows]
 
     async def get_candidates(self, contest_id: int) -> List[Dict]:
-        """
-        Nomzodlar ro'yxatini olish - OPTIMIZED
-        YANGI: Real-time vote_count bilan!
-        """
         async with self.pool.acquire() as conn:
             rows = await conn.fetch('''
                 SELECT c.*, COALESCE(COUNT(v.id), 0) as vote_count
@@ -270,12 +242,8 @@ class Database:
             ''', contest_id)
             return [dict(row) for row in rows]
 
-    # ==================== OVOZ BERISH FUNKSIYALARI ====================
-
     async def has_voted(self, contest_id: int, user_id: int) -> bool:
-        """Foydalanuvchi ovoz berganmi? - OPTIMIZED INDEX"""
         async with self.pool.acquire() as conn:
-            # idx_votes_contest_user ishlatiladi - juda tez!
             row = await conn.fetchrow('''
                 SELECT 1 FROM votes 
                 WHERE contest_id = $1 AND user_id = $2
@@ -285,18 +253,10 @@ class Database:
 
     async def add_vote(self, contest_id: int, candidate_id: int,
                        user_id: int, username: str = None) -> bool:
-        """
-        Ovoz qo'shish - OPTIMIZED (race condition yo'q!)
 
-        Transaction ishlatiladi:
-        - 1000 ta odam bir vaqtda ovoz bersa ham xavfsiz
-        - Har kim faqat 1 marta ovoz beradi
-        - Database LOCK bilan himoyalangan
-        """
         try:
             async with self.pool.acquire() as conn:
                 async with conn.transaction():
-                    # 1. Tekshirish (LOCK bilan - race condition yo'q!)
                     existing = await conn.fetchval('''
                         SELECT 1 FROM votes 
                         WHERE contest_id = $1 AND user_id = $2
@@ -307,7 +267,6 @@ class Database:
                         logger.warning(f"User {user_id} allaqachon ovoz bergan (transaction check)")
                         return False
 
-                    # 2. Ovoz qo'shish
                     await conn.execute('''
                         INSERT INTO votes (contest_id, candidate_id, user_id, username, voted_at)
                         VALUES ($1, $2, $3, $4, NOW())
@@ -317,7 +276,6 @@ class Database:
                     return True
 
         except asyncpg.UniqueViolationError:
-            # Backup check (agar transaction fail bo'lsa)
             logger.warning(f"UniqueViolation: User {user_id} allaqachon ovoz bergan")
             return False
         except Exception as e:
@@ -325,7 +283,6 @@ class Database:
             return False
 
     async def get_vote_results(self, contest_id: int) -> List[Dict]:
-        """Ovoz berish natijalarini olish - OPTIMIZED"""
         async with self.pool.acquire() as conn:
             rows = await conn.fetch('''
                 SELECT 
@@ -342,8 +299,6 @@ class Database:
                 ORDER BY votes DESC, c.name
             ''', contest_id)
             return [dict(row) for row in rows]
-
-    # ==================== ADMIN FUNKSIYALARI ====================
 
     async def get_detailed_report(self, contest_id: int) -> Dict:
         """Batafsil hisobot - OPTIMIZED"""
@@ -371,7 +326,6 @@ class Database:
             }
 
     async def archive_contest(self, contest_id: int):
-        """Konkursni arxivga o'tkazish"""
         async with self.pool.acquire() as conn:
             await conn.execute('''
                 UPDATE contests 
@@ -381,7 +335,6 @@ class Database:
             logger.info(f"Konkurs {contest_id} arxivga o'tkazildi")
 
     async def stop_contest(self, contest_id: int):
-        """Konkursni to'xtatish (muddatidan oldin)"""
         async with self.pool.acquire() as conn:
             await conn.execute('''
                 UPDATE contests 
@@ -393,7 +346,6 @@ class Database:
             logger.info(f"Konkurs {contest_id} to'xtatildi va arxivga o'tkazildi")
 
     async def reset_contest_votes(self, contest_id: int):
-        """Konkurs ovozlarini tozalash"""
         async with self.pool.acquire() as conn:
             result = await conn.execute(
                 'DELETE FROM votes WHERE contest_id = $1', contest_id
@@ -401,7 +353,6 @@ class Database:
             logger.info(f"Konkurs {contest_id} ovozlari tozalandi: {result}")
 
     async def get_archived_contests(self) -> List[Dict]:
-        """Arxivlangan konkurslar - OPTIMIZED"""
         async with self.pool.acquire() as conn:
             rows = await conn.fetch('''
                 SELECT 
@@ -416,11 +367,8 @@ class Database:
             ''')
             return [dict(row) for row in rows]
 
-    # ==================== SPAM HIMOYASI ====================
-
     async def update_user_activity(self, user_id: int, username: str = None,
                                    first_name: str = None, last_name: str = None):
-        """Foydalanuvchi faolligini yangilash"""
         async with self.pool.acquire() as conn:
             await conn.execute('''
                 INSERT INTO users (user_id, username, first_name, last_name, last_action)
@@ -434,9 +382,7 @@ class Database:
             ''', user_id, username, first_name, last_name)
 
     async def check_rate_limit(self, user_id: int, seconds: int = 5) -> bool:
-        """Rate limit tekshirish - OPTIMIZED INDEX"""
         async with self.pool.acquire() as conn:
-            # idx_users_last_action ishlatiladi
             row = await conn.fetchrow('''
                 SELECT 1 FROM users 
                 WHERE user_id = $1 
@@ -445,10 +391,7 @@ class Database:
             ''', user_id, seconds)
             return row is None
 
-    # ==================== STATISTIKA ====================
-
     async def get_total_stats(self) -> Dict:
-        """Umumiy statistika"""
         async with self.pool.acquire() as conn:
             stats = await conn.fetchrow('''
                 SELECT 
@@ -460,7 +403,6 @@ class Database:
             return dict(stats) if stats else {}
 
     async def close(self):
-        """Database ulanishini yopish"""
         if self.pool:
             await self.pool.close()
             logger.info("Database ulanishi yopildi")
