@@ -6,9 +6,15 @@ from aiogram.types import (
 )
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from typing import List, Dict
+from utils import format_vote_count
 
+
+# =========================
+# REPLY KEYBOARDS
+# =========================
 
 def main_menu_keyboard(is_admin: bool = False) -> ReplyKeyboardMarkup:
+    """Asosiy menyu klaviaturasi"""
     keyboard = [
         [KeyboardButton(text="🗳 Ovoz berish")],
         [KeyboardButton(text="📊 Natijalar"), KeyboardButton(text="ℹ️ Ma'lumot")]
@@ -25,6 +31,7 @@ def main_menu_keyboard(is_admin: bool = False) -> ReplyKeyboardMarkup:
 
 
 def admin_menu_keyboard() -> ReplyKeyboardMarkup:
+    """Admin menyu klaviaturasi"""
     keyboard = [
         [KeyboardButton(text="➕ Yangi konkurs"), KeyboardButton(text="📊 Natijalar")],
         [KeyboardButton(text="📋 Batafsil hisobot"), KeyboardButton(text="📥 Eksport")],
@@ -39,27 +46,13 @@ def admin_menu_keyboard() -> ReplyKeyboardMarkup:
         input_field_placeholder="Admin amallarini tanlang..."
     )
 
-def format_vote_count(count: int) -> str:
 
-    if count < 1000:
-        return str(count)
-    elif count < 1000000:
-        k_value = count / 1000
-        if k_value >= 10:
-            return f"{int(k_value)}K"
-        else:
-            formatted = f"{k_value:.1f}K"
-            return formatted.replace('.0K', 'K')
-    else:
-        m_value = count / 1000000
-        if m_value >= 10:
-            return f"{int(m_value)}M"
-        else:
-            formatted = f"{m_value:.1f}M"
-            return formatted.replace('.0M', 'M')
-
+# =========================
+# INLINE KEYBOARDS
+# =========================
 
 def channels_keyboard(channels: List[Dict]) -> InlineKeyboardMarkup:
+    """Kanallarga obuna bo'lish klaviaturasi"""
     keyboard = []
 
     for i, channel in enumerate(channels, 1):
@@ -81,17 +74,32 @@ def channels_keyboard(channels: List[Dict]) -> InlineKeyboardMarkup:
 
 
 def vote_keyboard(candidates: List[Dict], contest_id: int,
-                  bot_username: str = "uznmc_bot") -> InlineKeyboardMarkup:
+                  bot_username: str = "vacantvoting_bot") -> InlineKeyboardMarkup:
+    """
+    Kanalga post uchun inline keyboard (Deep link)
 
+    REAL-TIME OVOZLAR SONI BILAN!
+
+    Har bir nomzod yonida ovozlar soni dinamik ko'rsatiladi:
+    - Dr.Aziz - 234
+    - Dr.Nodir - 2.3K
+    - Dr.Jasur - 15K
+
+    Ovoz berganda bu keyboard avtomatik yangilanadi!
+    """
     kb = InlineKeyboardBuilder()
 
     for candidate in candidates:
+        # Real-time ovozlar sonini olish
         vote_count = candidate.get('vote_count', 0)
 
+        # Formatlangan ovozlar soni (234 yoki 2.3K)
         formatted_count = format_vote_count(vote_count)
 
-        button_text = f" {candidate['name']} - {formatted_count}"
+        # Tugma matni
+        button_text = f"👤 {candidate['name']} - {formatted_count}"
 
+        # Deep link URL
         deep_link = f"https://t.me/{bot_username}?start=vote_{contest_id}_{candidate['id']}"
 
         kb.button(
@@ -99,7 +107,7 @@ def vote_keyboard(candidates: List[Dict], contest_id: int,
             url=deep_link
         )
 
-    kb.adjust(1)
+    kb.adjust(1)  # Har bir nomzod alohida qatorda
     return kb.as_markup()
 
 

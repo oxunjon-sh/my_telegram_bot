@@ -482,7 +482,6 @@ async def show_results(message: Message, db: Database):
 
 # ==================== MA'LUMOT ====================
 
-
 @router.message(F.text == "ℹ️ Ma'lumot")
 async def show_info(message: Message, db: Database):
     """Bot haqida ma'lumot"""

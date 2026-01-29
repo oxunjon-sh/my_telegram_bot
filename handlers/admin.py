@@ -234,12 +234,14 @@ async def process_start_date(message: Message, state: FSMContext):
 
         # Agar o'tgan vaqt kiritilsa
         if start_date < now:
+            current_time_str = format_datetime(now)
+            entered_time_str = format_datetime(start_date)
             kb = back_inline_keyboard()
             await message.answer(
-                "❌ O'tgan vaqtni kirita olmaysiz!\n\n"
-                f"Hozirgi vaqt: {format_datetime(now)} (Toshkent)\n"
-                f"Siz kiritdingiz: {format_datetime(start_date)} (Toshkent)\n\n"
-                "Iltimos, kelajak vaqtni kiriting:",
+                f"❌ O'tgan vaqtni kirita olmaysiz!\n\n"
+                f"Hozirgi vaqt: {current_time_str} (Toshkent)\n"
+                f"Siz kiritdingiz: {entered_time_str} (Toshkent)\n\n"
+                f"Iltimos, kelajak vaqtni kiriting:",
                 reply_markup=kb.as_markup()
             )
             return
@@ -376,8 +378,8 @@ async def process_channel_id(message: Message, state: FSMContext):
         if chat.type not in ['channel', 'supergroup']:
             kb = back_inline_keyboard()
             await message.answer(
-                f"❌ Bu kanal emas! Type: {chat.type}\n"
-                "Iltimos, PUBLIC kanal yoki supergrup ID sini kiriting.",
+                f"❌ Bu kanal emas! Type: {chat.type}" + "\n"
+                                                        "Iltimos, PUBLIC kanal yoki supergrup ID sini kiriting.",
                 reply_markup=kb.as_markup()
             )
             return
@@ -407,11 +409,12 @@ Nom kiriting (yoki /skip nom o'zgarmaydi):
         kb = back_inline_keyboard()
         await message.answer(
             f"❌ Kanal topilmadi!\n\n"
-            f"Xato: {str(e)}\n\n"
-            f"Iltimos, to'g'ri kanal ID sini kiriting:\n"
-            f"• Username: <code>@mychannel</code>\n"
-            f"• Yoki numeric ID: <code>-1001234567890</code>\n\n"
-            f"⚠️ Bot kanal adminlarida bo'lishi kerak!",
+            f"Xato: {str(e)}" + "\
+" + "\n"
+    f"Iltimos, to'g'ri kanal ID sini kiriting:\n"
+    f"• Username: <code>@mychannel</code>\n"
+    f"• Yoki numeric ID: <code>-1001234567890</code>\n\n"
+    f"⚠️ Bot kanal adminlarida bo'lishi kerak!",
             reply_markup=kb.as_markup()
         )
 
@@ -576,7 +579,7 @@ async def show_contest_preview(message: Message, state: FSMContext, db: Database
 """
 
     for i, cand in enumerate(data['candidates'], 1):
-        text += f"{i}. {cand['name']}\n"
+        text += f"{i}. {cand['name']}" + "\n"
 
     text += "\n❓ <b>Kanalga post qilishni tasdiqlaysizmi?</b>"
 
@@ -682,8 +685,9 @@ async def confirm_post_to_channel(callback: CallbackQuery, state: FSMContext, db
             pass
 
         await callback.message.answer(
-            f"❌ Xatolik yuz berdi: {str(e)}\n\n"
-            "Iltimos, qaytadan urinib ko'ring."
+            f"❌ Xatolik yuz berdi: {str(e)}" + "\
+" + "\n"
+    "Iltimos, qaytadan urinib ko'ring."
         )
         await state.clear()
 
@@ -861,7 +865,8 @@ async def stop_contest_execute(callback: CallbackQuery, db: Database):
         for i, candidate in enumerate(report['candidates'][:3], 1):
             medal = "🥇" if i == 1 else "🥈" if i == 2 else "🥉"
             percentage = candidate.get('percentage') or 0
-            winners_text += f"{medal} <b>{candidate['candidate_name']}</b> - {candidate['votes']} ovoz ({percentage:.1f}%)\n"
+            winners_text += f"{medal} <b>{candidate['candidate_name']}</b> - {candidate['votes']} ovoz ({percentage:.1f}%)" + "\
+"
 
         text = f"""
 ✅ <b>KONKURS TO'XTATILDI!</b>
@@ -944,8 +949,10 @@ async def detailed_report(message: Message, db: Database):
     for i, candidate in enumerate(report['candidates'], 1):
         medal = "🥇" if i == 1 else "🥈" if i == 2 else "🥉" if i == 3 else f"{i}."
         percentage = candidate.get('percentage') or 0
-        text += f"\n{medal} <b>{candidate['candidate_name']}</b>\n"
-        text += f"   📊 {candidate['votes']} ovoz ({percentage:.1f}%)\n"
+        text += f"\n{medal} <b>{candidate['candidate_name']}</b>" + "\
+"
+        text += f"   📊 {candidate['votes']} ovoz ({percentage:.1f}%)" + "\
+"
 
     await message.answer(text)
     log_user_action(message.from_user.id, message.from_user.username, "VIEW_REPORT")
@@ -1138,8 +1145,8 @@ async def reset_votes_execute(callback: CallbackQuery, db: Database):
 
         await callback.message.edit_text(
             f"✅ <b>Ovozlar tozalandi!</b>\n\n"
-            f"Konkurs: {contest['name']}\n"
-            f"Barcha ovozlar o'chirildi."
+            f"Konkurs: {contest['name']}" + "\n"
+                                            f"Barcha ovozlar o'chirildi."
         )
 
         log_user_action(callback.from_user.id, callback.from_user.username, "RESET_VOTES")
@@ -1164,7 +1171,8 @@ async def view_archive(message: Message, db: Database):
     text = "📚 <b>Arxivlangan konkurslar</b>\n\n"
 
     if contests:
-        text += f"Jami: {len(contests)} ta konkurs\n\n"
+        text += f"Jami: {len(contests)} ta konkurs\n" + "\
+"
         await message.answer(text, reply_markup=archive_keyboard(contests))
     else:
         text += "📭 Arxiv bo'sh"
@@ -1197,8 +1205,10 @@ async def view_archived_contest(callback: CallbackQuery, db: Database):
     for i, candidate in enumerate(report['candidates'][:3], 1):
         medal = "🥇" if i == 1 else "🥈" if i == 2 else "🥉"
         percentage = candidate.get('percentage') or 0
-        text += f"\n{medal} <b>{candidate['candidate_name']}</b>\n"
-        text += f"   {candidate['votes']} ovoz ({percentage:.1f}%)\n"
+        text += f"\n{medal} <b>{candidate['candidate_name']}</b>" + "\
+"
+        text += f"   {candidate['votes']} ovoz ({percentage:.1f}%)" + "\
+"
 
     await callback.message.edit_text(text, reply_markup=export_keyboard(contest_id))
 
@@ -1225,7 +1235,8 @@ async def quick_stats(message: Message, db: Database):
 """
 
     if top_candidate:
-        text += f"\n🏆 Lider: <b>{top_candidate['candidate_name']}</b>\n"
+        text += f"\n🏆 Lider: <b>{top_candidate['candidate_name']}</b>" + "\
+"
         text += f"       ({top_candidate['votes']} ovoz)"
 
     await message.answer(text)
