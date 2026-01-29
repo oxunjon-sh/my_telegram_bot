@@ -9,51 +9,31 @@ import logging
 
 from database import Database
 from keyboards import main_menu_keyboard, confirm_vote_keyboard, vote_keyboard
-from utils import is_admin, format_results_text, log_user_action, format_vote_count, get_current_datetime
-import config
+from utils import is_admin, format_results_text, log_user_action, format_vote_count
 
 router = Router()
 logger = logging.getLogger(__name__)
-
-
 class VotingStates(StatesGroup):
     waiting_for_subscription = State()
     selecting_candidate = State()
     confirming_vote = State()
 
-
-# ==================== KANAL POSTINI YANGILASH ====================
-
 async def update_channel_post(bot, db: Database, contest_id: int):
-    """
-    Kanal postidagi ovozlar sonini yangilash
 
-    REAL-TIME UPDATE!
-    Har safar ovoz berilganda kanalda ovozlar soni avtomatik yangilanadi.
-
-    Misol:
-    - Dr.Aziz - 234 → Dr.Aziz - 235
-    - Dr.Nodir - 2.3K → Dr.Nodir - 2.4K
-    """
     try:
-        # Kanal post ma'lumotlarini olish
         post_info = await db.get_contest_channel_post(contest_id)
 
         if not post_info:
             logger.warning(f"Konkurs {contest_id} uchun kanal post topilmadi")
             return
 
-        # Yangi ovozlar soni bilan nomzodlarni olish
         candidates = await db.get_candidates(contest_id)
 
-        # Bot username
         bot_info = await bot.get_me()
         bot_username = bot_info.username
 
-        # Yangi keyboard yaratish (ovozlar soni bilan)
         new_keyboard = vote_keyboard(candidates, contest_id, bot_username)
 
-        # Kanal postini yangilash (faqat keyboard)
         await bot.edit_message_reply_markup(
             chat_id=post_info['chat_id'],
             message_id=post_info['message_id'],
@@ -67,8 +47,6 @@ async def update_channel_post(bot, db: Database, contest_id: int):
         # Xatolik bo'lsa ham ovoz saqlanadi - post yangilanmaydi
         logger.error(f"Kanal postini yangilashda xato (Contest {contest_id}): {e}")
 
-
-# ==================== START KOMANDA ====================
 
 @router.message(Command("start"))
 async def cmd_start(message: Message, db: Database, state: FSMContext):
@@ -91,7 +69,7 @@ async def cmd_start(message: Message, db: Database, state: FSMContext):
                                      reply_markup=main_menu_keyboard(is_user_admin))
                 return
 
-            now = get_current_datetime()
+            now = datetime.now()
             if now < contest['start_date']:
                 await message.answer(
                     f"⏰ Konkurs hali boshlanmagan!\n📅 Boshlanish: {contest['start_date'].strftime('%d.%m.%Y %H:%M')}",
@@ -135,7 +113,6 @@ async def show_contest_post_deep_link(message: Message, db: Database, state: FSM
     contest = await db.get_contest_by_id(contest_id)
     candidates = await db.get_candidates(contest_id)
 
-    # SODDA POST - faqat konkurs nomi
     post_text = f"🗳 <b>{contest['name']}</b>"
 
     if contest.get('image_file_id'):
@@ -149,7 +126,7 @@ async def show_contest_post_deep_link(message: Message, db: Database, state: FSM
         vote_count = candidate.get('vote_count', 0)
         formatted_count = format_vote_count(vote_count)
         kb.button(
-            text=f"👤 {candidate['name']} - {formatted_count}",
+            text=f" {candidate['name']} - {formatted_count}",
             callback_data=f"vote_deep_{contest_id}_{candidate['id']}"
         )
     kb.adjust(1)
@@ -158,7 +135,6 @@ async def show_contest_post_deep_link(message: Message, db: Database, state: FSM
 
 
 async def show_contest_post_for_voting(message: Message, db: Database, contest_id: int, state: FSMContext):
-    """Bot ichidan ovoz berish"""
     contest = await db.get_contest_by_id(contest_id)
     candidates = await db.get_candidates(contest_id)
 
@@ -166,7 +142,6 @@ async def show_contest_post_for_voting(message: Message, db: Database, contest_i
         await message.answer("❌ Nomzodlar qo'shilmagan.")
         return
 
-    # SODDA POST - faqat konkurs nomi
     post_text = f"🗳 <b>{contest['name']}</b>"
 
     kb = InlineKeyboardBuilder()
@@ -174,7 +149,7 @@ async def show_contest_post_for_voting(message: Message, db: Database, contest_i
         vote_count = candidate.get('vote_count', 0)
         formatted_count = format_vote_count(vote_count)
         kb.button(
-            text=f"👤 {candidate['name']} - {formatted_count}",
+            text=f"{candidate['name']} - {formatted_count}",
             callback_data=f"vote_{candidate['id']}"
         )
     kb.adjust(1)
@@ -188,23 +163,15 @@ async def show_contest_post_for_voting(message: Message, db: Database, contest_i
     await state.set_state(VotingStates.selecting_candidate)
     log_user_action(message.from_user.id, message.from_user.username, "VIEW_CANDIDATES")
 
-
-# ==================== CALLBACKS ====================
-
 @router.callback_query(F.data.startswith("vote_deep_"))
 async def vote_from_deep_link(callback: CallbackQuery, db: Database, state: FSMContext):
-    """
-    Deep link orqali ovoz berish
 
-    YANGI: Ovoz bergandan keyin kanal postini yangilash!
-    """
     await callback.answer()
     parts = callback.data.split("_")
     contest_id = int(parts[2])
     candidate_id = int(parts[3])
     user = callback.from_user
 
-    # Kanal obunasini tekshirish
     channels = await db.get_contest_channels(contest_id)
     not_subscribed = []
 
@@ -227,18 +194,15 @@ async def vote_from_deep_link(callback: CallbackQuery, db: Database, state: FSMC
         await state.update_data(contest_id=contest_id, candidate_id=candidate_id)
         return
 
-    # Nomzodni topish
     candidates = await db.get_candidates(contest_id)
     candidate = next((c for c in candidates if c['id'] == candidate_id), None)
     if not candidate:
         await callback.message.answer("❌ Nomzod topilmadi!")
         return
 
-    # Ovoz qo'shish
     success = await db.add_vote(contest_id, candidate_id, user.id, user.username)
 
     if success:
-        # ✅ YANGI: Kanal postini yangilash!
         await update_channel_post(callback.bot, db, contest_id)
 
         text = f"✅ <b>Ovozingiz qabul qilindi!</b>\n\nSiz <b>{candidate['name']}</b> ga ovoz berdingiz.\n\nRahmat! 🎉"
@@ -281,7 +245,6 @@ async def check_subscription_deep(callback: CallbackQuery, db: Database, state: 
         except:
             await callback.message.answer(text, reply_markup=kb.as_markup())
     else:
-        # Obuna tasdiqlandi - ovoz berish
         await callback.answer("✅ Obuna tasdiqlandi!", show_alert=True)
 
         candidates = await db.get_candidates(contest_id)
@@ -294,7 +257,6 @@ async def check_subscription_deep(callback: CallbackQuery, db: Database, state: 
         success = await db.add_vote(contest_id, candidate_id, callback.from_user.id, callback.from_user.username)
 
         if success:
-            # ✅ YANGI: Kanal postini yangilash!
             await update_channel_post(callback.bot, db, contest_id)
 
             text = f"✅ <b>Ovozingiz qabul qilindi!</b>\n\nSiz <b>{candidate['name']}</b> ga ovoz berdingiz.\n\nRahmat! 🎉"
@@ -330,11 +292,7 @@ async def select_candidate(callback: CallbackQuery, db: Database, state: FSMCont
 
 @router.callback_query(F.data.startswith("confirm_vote_"))
 async def confirm_vote(callback: CallbackQuery, db: Database, state: FSMContext):
-    """
-    Ovozni tasdiqlash
 
-    YANGI: Ovoz bergandan keyin kanal postini yangilash!
-    """
     await callback.answer()
     candidate_id = int(callback.data.split("_")[2])
     data = await state.get_data()
@@ -345,7 +303,6 @@ async def confirm_vote(callback: CallbackQuery, db: Database, state: FSMContext)
     success = await db.add_vote(contest_id, candidate_id, user.id, user.username)
 
     if success:
-        # ✅ YANGI: Kanal postini yangilash!
         await update_channel_post(callback.bot, db, contest_id)
 
         candidates = await db.get_candidates(contest_id)
@@ -366,9 +323,6 @@ async def cancel_vote(callback: CallbackQuery, state: FSMContext):
     await callback.message.delete()
     await state.clear()
 
-
-# ==================== OVOZ BERISH TUGMASI ====================
-
 @router.message(F.text == "🗳 Ovoz berish")
 async def vote_button(message: Message, db: Database, state: FSMContext):
     """Bot ichidan ovoz berish tugmasi"""
@@ -386,7 +340,7 @@ async def vote_button(message: Message, db: Database, state: FSMContext):
         await message.answer("❌ Hozirda faol konkurs yo'q.", reply_markup=main_menu_keyboard(user_is_admin))
         return
 
-    now = get_current_datetime()
+    now = datetime.now()
     if now < contest['start_date']:
         await message.answer(
             f"⏰ Konkurs hali boshlanmagan!\n📅 Boshlanish: {contest['start_date'].strftime('%d.%m.%Y %H:%M')}")
@@ -399,7 +353,6 @@ async def vote_button(message: Message, db: Database, state: FSMContext):
                              reply_markup=main_menu_keyboard(user_is_admin))
         return
 
-    # Kanal obunasini tekshirish
     channels = await db.get_contest_channels(contest['id'])
     not_subscribed = []
     for channel in channels or []:
@@ -463,9 +416,6 @@ async def check_subscription_vote(callback: CallbackQuery, db: Database, state: 
         await callback.message.delete()
         await show_contest_post_for_voting(callback.message, db, contest_id, state)
 
-
-# ==================== NATIJALAR ====================
-
 @router.message(F.text == "📊 Natijalar")
 async def show_results(message: Message, db: Database):
     """Natijalarni ko'rish"""
@@ -478,9 +428,6 @@ async def show_results(message: Message, db: Database):
     text = format_results_text(results, contest['name'])
     await message.answer(text)
     log_user_action(message.from_user.id, message.from_user.username, "VIEW_RESULTS")
-
-
-# ==================== MA'LUMOT ====================
 
 @router.message(F.text == "ℹ️ Ma'lumot")
 async def show_info(message: Message, db: Database):
