@@ -2,7 +2,7 @@ import logging
 import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import List, Dict
 import io
 import config
@@ -26,15 +26,44 @@ def setup_logging():
 
 
 def is_admin(user_id: int) -> bool:
+    """Foydalanuvchi admin ekanligini tekshirish"""
     return user_id in config.ADMIN_IDS
 
 
 def format_datetime(dt: datetime) -> str:
-    """Sana va vaqtni formatlash"""
-    return dt.strftime("%d.%m.%Y %H:%M")
+    """
+    Sana va vaqtni formatlash (UTC → Toshkent vaqti)
+
+    Database UTC da saqlaydi, user Toshkent vaqtida ko'radi
+
+    Args:
+        dt: UTC datetime
+
+    Returns:
+        Formatted string: "DD.MM.YYYY HH:MM" (Toshkent vaqti)
+
+    Example:
+        Input:  2026-01-29 10:00 (UTC)
+        Output: "29.01.2026 15:00" (Toshkent +5)
+    """
+    # UTC dan Toshkent vaqtiga (+5 soat)
+    tashkent_dt = dt + timedelta(hours=5)
+    return tashkent_dt.strftime("%d.%m.%Y %H:%M")
 
 
 def format_vote_count(count: int) -> str:
+    """
+    Ovozlar sonini formatlash:
+    0-999: 123
+    1000-999999: 1.2K
+    1000000+: 1.2M
+
+    Args:
+        count: Ovozlar soni
+
+    Returns:
+        Formatted string
+    """
     if count < 1000:
         return str(count)
     elif count < 1000000:
@@ -54,6 +83,7 @@ def format_vote_count(count: int) -> str:
 
 
 def format_results_text(results: List[Dict], contest_name: str = "") -> str:
+    """Natijalar textini formatlash"""
     text = f"📊 <b>{contest_name}</b>\n\n"
 
     if not results:
@@ -76,7 +106,9 @@ def format_results_text(results: List[Dict], contest_name: str = "") -> str:
 
     return text
 
+
 async def create_excel_report(report_data: Dict) -> io.BytesIO:
+    """Excel hisobot yaratish"""
     output = io.BytesIO()
 
     contest = report_data['contest']
@@ -84,7 +116,7 @@ async def create_excel_report(report_data: Dict) -> io.BytesIO:
     stats = report_data['stats']
 
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
-
+        # Umumiy ma'lumotlar
         info_data = {
             'Parametr': [
                 'Konkurs nomi',
@@ -95,27 +127,25 @@ async def create_excel_report(report_data: Dict) -> io.BytesIO:
             ],
             'Qiymat': [
                 contest['name'],
-                format_datetime(contest['start_date']),
-                format_datetime(contest['end_date']),
+                format_datetime(contest['start_date']),  # ✅ UTC → Toshkent
+                format_datetime(contest['end_date']),  # ✅ UTC → Toshkent
                 stats['total_voters'],
                 stats['total_votes']
             ]
         }
-
         df_info = pd.DataFrame(info_data)
-        df_info.to_excel(writer, sheet_name="Ma'lumot", index=False)
+        df_info.to_excel(writer, sheet_name='Ma\'lumot', index=False)
 
-        sheet_info = writer.book["Ma'lumot"]
+        sheet_info = writer.book['Ma\'lumot']
         sheet_info.column_dimensions['A'].width = 25
         sheet_info.column_dimensions['B'].width = 40
 
-
+        # Natijalar
         results_data = {
             'Nomzod': [c['candidate_name'] for c in candidates],
             'Ovozlar': [c['votes'] for c in candidates],
             'Foiz': [f"{c['percentage']}%" for c in candidates]
         }
-
         df_results = pd.DataFrame(results_data)
         df_results.to_excel(writer, sheet_name='Natijalar', index=False)
 
@@ -129,6 +159,7 @@ async def create_excel_report(report_data: Dict) -> io.BytesIO:
 
 
 async def create_csv_report(candidates: List[Dict]) -> io.BytesIO:
+    """CSV hisobot yaratish"""
     output = io.BytesIO()
 
     df = pd.DataFrame([
@@ -148,6 +179,7 @@ async def create_csv_report(candidates: List[Dict]) -> io.BytesIO:
 
 
 async def create_chart(candidates: List[Dict], contest_name: str) -> io.BytesIO:
+    """Grafik yaratish"""
     output = io.BytesIO()
 
     names = [c['candidate_name'] for c in candidates]
@@ -156,6 +188,7 @@ async def create_chart(candidates: List[Dict], contest_name: str) -> io.BytesIO:
     fig, ax = plt.subplots(figsize=(10, 6))
     bars = ax.barh(names, votes, color='#3498db')
 
+    # Ranglar
     if len(bars) > 0:
         bars[0].set_color('#FFD700')  # Oltin
     if len(bars) > 1:
@@ -167,6 +200,7 @@ async def create_chart(candidates: List[Dict], contest_name: str) -> io.BytesIO:
     ax.set_title(f'📊 {contest_name}', fontsize=14, fontweight='bold')
     ax.grid(axis='x', alpha=0.3)
 
+    # Qiymatlarni ko'rsatish
     for i, (name, vote) in enumerate(zip(names, votes)):
         ax.text(vote + 0.5, i, str(vote), va='center', fontsize=10)
 
@@ -179,6 +213,21 @@ async def create_chart(candidates: List[Dict], contest_name: str) -> io.BytesIO:
 
 
 def parse_datetime(date_str: str) -> datetime:
+    """
+    String'dan datetime'ga o'tkazish (Toshkent → UTC)
+
+    User Toshkent vaqtida kiritadi, database UTC da saqlaydi
+
+    Args:
+        date_str: Sana string formatda (DD.MM.YYYY HH:MM)
+
+    Returns:
+        UTC datetime
+
+    Example:
+        Input:  "29.01.2026 15:00" (Toshkent vaqti)
+        Output: 2026-01-29 10:00 (UTC -5)
+    """
     formats = [
         "%d.%m.%Y %H:%M",
         "%d/%m/%Y %H:%M",
@@ -190,16 +239,39 @@ def parse_datetime(date_str: str) -> datetime:
 
     for fmt in formats:
         try:
-            return datetime.strptime(date_str, fmt)
+            # Parse (Toshkent vaqti)
+            tashkent_dt = datetime.strptime(date_str, fmt)
+
+            # UTC ga convert (-5 soat)
+            utc_dt = tashkent_dt - timedelta(hours=5)
+
+            return utc_dt
+
         except ValueError:
             continue
 
     raise ValueError(f"Sana formati noto'g'ri: {date_str}")
 
 
+def get_current_datetime() -> datetime:
+    """
+    Joriy UTC vaqtni olish
+
+    Returns:
+        UTC datetime
+
+    Example:
+        Server UTC da: 10:00
+        Returns: 2026-01-29 10:00 (UTC)
+    """
+    return datetime.utcnow()
+
+
 def validate_channel_link(link: str) -> bool:
+    """Kanal linkini tekshirish"""
     return link.startswith('https://t.me/') or link.startswith('@')
 
 
 def log_user_action(user_id: int, username: str, action: str):
+    """Foydalanuvchi harakatini loglash"""
     logger.info(f"User: {user_id} (@{username}) - Action: {action}")
