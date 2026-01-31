@@ -25,7 +25,7 @@ class Database:
             await conn.execute('''
                 CREATE TABLE IF NOT EXISTS contests (
                     id SERIAL PRIMARY KEY,
-                    name VARCHAR(255) NOT NULL,
+                    name TEXT NOT NULL,
                     description TEXT,
                     image_file_id VARCHAR(255),
                     start_date TIMESTAMP NOT NULL,
@@ -70,7 +70,7 @@ class Database:
                 CREATE TABLE IF NOT EXISTS candidates (
                     id SERIAL PRIMARY KEY,
                     contest_id INTEGER REFERENCES contests(id) ON DELETE CASCADE,
-                    name VARCHAR(255) NOT NULL,
+                    name TEXT NOT NULL,
                     description TEXT,
                     position INTEGER DEFAULT 0,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
