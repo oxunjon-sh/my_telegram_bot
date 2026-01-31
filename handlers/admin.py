@@ -581,7 +581,7 @@ async def show_contest_preview(message: Message, state: FSMContext, db: Database
     for i, cand in enumerate(data['candidates'], 1):
         text += f"{i}. {cand['name']}" + '\n'
 
-    text += "\n❓ <b>Kanalga post qilishni tasdiqlaysizmi?</b>"
+    text += '\n❓ <b>Kanalga post qilishni tasdiqlaysizmi?</b>'
 
     # Tasdiqlash tugmalari
     kb = InlineKeyboardBuilder()
