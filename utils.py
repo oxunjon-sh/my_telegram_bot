@@ -2,7 +2,7 @@ import logging
 import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import List, Dict
 import io
 import config
@@ -26,44 +26,15 @@ def setup_logging():
 
 
 def is_admin(user_id: int) -> bool:
-    """Foydalanuvchi admin ekanligini tekshirish"""
     return user_id in config.ADMIN_IDS
 
 
 def format_datetime(dt: datetime) -> str:
-    """
-    Sana va vaqtni formatlash (UTC → Toshkent vaqti)
-
-    Database UTC da saqlaydi, user Toshkent vaqtida ko'radi
-
-    Args:
-        dt: UTC datetime
-
-    Returns:
-        Formatted string: "DD.MM.YYYY HH:MM" (Toshkent vaqti)
-
-    Example:
-        Input:  2026-01-29 10:00 (UTC)
-        Output: "29.01.2026 15:00" (Toshkent +5)
-    """
-    # UTC dan Toshkent vaqtiga (+5 soat)
-    tashkent_dt = dt + timedelta(hours=5)
-    return tashkent_dt.strftime("%d.%m.%Y %H:%M")
+    """Sana va vaqtni formatlash"""
+    return dt.strftime("%d.%m.%Y %H:%M")
 
 
 def format_vote_count(count: int) -> str:
-    """
-    Ovozlar sonini formatlash:
-    0-999: 123
-    1000-999999: 1.2K
-    1000000+: 1.2M
-
-    Args:
-        count: Ovozlar soni
-
-    Returns:
-        Formatted string
-    """
     if count < 1000:
         return str(count)
     elif count < 1000000:
@@ -83,7 +54,6 @@ def format_vote_count(count: int) -> str:
 
 
 def format_results_text(results: List[Dict], contest_name: str = "") -> str:
-    """Natijalar textini formatlash"""
     text = f"📊 <b>{contest_name}</b>\n\n"
 
     if not results:
@@ -106,13 +76,7 @@ def format_results_text(results: List[Dict], contest_name: str = "") -> str:
 
     return text
 
-
 async def create_excel_report(report_data: Dict) -> io.BytesIO:
-    """
-    Excel hisobot yaratish (MEMORY OPTIMIZED for large datasets)
-
-    Uses streaming for large reports to avoid memory issues
-    """
     output = io.BytesIO()
 
     contest = report_data['contest']
@@ -120,7 +84,7 @@ async def create_excel_report(report_data: Dict) -> io.BytesIO:
     stats = report_data['stats']
 
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
-        # Umumiy ma'lumotlar
+
         info_data = {
             'Parametr': [
                 'Konkurs nomi',
@@ -130,43 +94,33 @@ async def create_excel_report(report_data: Dict) -> io.BytesIO:
                 'Jami ovozlar'
             ],
             'Qiymat': [
-                contest['name'][:1000] if len(contest['name']) > 1000 else contest['name'],  # Truncate if too long
-                format_datetime(contest['start_date']),  # ✅ UTC → Toshkent
-                format_datetime(contest['end_date']),  # ✅ UTC → Toshkent
+                contest['name'],
+                format_datetime(contest['start_date']),
+                format_datetime(contest['end_date']),
                 stats['total_voters'],
                 stats['total_votes']
             ]
         }
+
         df_info = pd.DataFrame(info_data)
-        df_info.to_excel(writer, sheet_name='Malumot', index=False)
+        df_info.to_excel(writer, sheet_name="Ma'lumot", index=False)
 
-        sheet_info = writer.book['Malumot']
+        sheet_info = writer.book["Ma'lumot"]
         sheet_info.column_dimensions['A'].width = 25
-        sheet_info.column_dimensions['B'].width = 50
+        sheet_info.column_dimensions['B'].width = 40
 
-        # Natijalar (chunked for large datasets)
-        # Process in batches to avoid memory issues
-        batch_size = 1000
-        for i in range(0, len(candidates), batch_size):
-            batch = candidates[i:i + batch_size]
-            results_data = {
-                'Nomzod': [c['candidate_name'][:500] for c in batch],  # Truncate long names
-                'Ovozlar': [c['votes'] for c in batch],
-                'Foiz': [f"{c['percentage']:.2f}%" for c in batch]
-            }
 
-            df_results = pd.DataFrame(results_data)
+        results_data = {
+            'Nomzod': [c['candidate_name'] for c in candidates],
+            'Ovozlar': [c['votes'] for c in candidates],
+            'Foiz': [f"{c['percentage']}%" for c in candidates]
+        }
 
-            if i == 0:
-                # First batch - create sheet
-                df_results.to_excel(writer, sheet_name='Natijalar', index=False, startrow=0)
-            else:
-                # Append subsequent batches
-                df_results.to_excel(writer, sheet_name='Natijalar', index=False,
-                                    startrow=i + 1, header=False)
+        df_results = pd.DataFrame(results_data)
+        df_results.to_excel(writer, sheet_name='Natijalar', index=False)
 
         sheet_results = writer.book['Natijalar']
-        sheet_results.column_dimensions['A'].width = 40
+        sheet_results.column_dimensions['A'].width = 30
         sheet_results.column_dimensions['B'].width = 15
         sheet_results.column_dimensions['C'].width = 15
 
@@ -175,55 +129,25 @@ async def create_excel_report(report_data: Dict) -> io.BytesIO:
 
 
 async def create_csv_report(candidates: List[Dict]) -> io.BytesIO:
-    """
-    CSV hisobot yaratish (MEMORY OPTIMIZED for large datasets)
-
-    Uses streaming CSV writing for large reports
-    """
     output = io.BytesIO()
 
-    # For large datasets, write directly to avoid memory issues
-    if len(candidates) > 10000:
-        # Stream writing for very large datasets
-        import csv
-        from io import StringIO
+    df = pd.DataFrame([
+        {
+            'Nomzod': c['candidate_name'],
+            'Ovozlar': c['votes'],
+            'Foiz': c['percentage']
+        }
+        for c in candidates
+    ])
 
-        string_buffer = StringIO()
-        writer = csv.writer(string_buffer)
-
-        # Header
-        writer.writerow(['Nomzod', 'Ovozlar', 'Foiz'])
-
-        # Write in chunks
-        for candidate in candidates:
-            writer.writerow([
-                candidate['candidate_name'][:500],  # Truncate long names
-                candidate['votes'],
-                f"{candidate['percentage']:.2f}%"
-            ])
-
-        # Convert to bytes
-        output.write(string_buffer.getvalue().encode('utf-8-sig'))
-    else:
-        # Use pandas for smaller datasets (faster)
-        df = pd.DataFrame([
-            {
-                'Nomzod': c['candidate_name'][:500],
-                'Ovozlar': c['votes'],
-                'Foiz': f"{c['percentage']:.2f}%"
-            }
-            for c in candidates
-        ])
-
-        csv_data = df.to_csv(index=False, encoding='utf-8-sig')
-        output.write(csv_data.encode('utf-8-sig'))
-
+    csv_data = df.to_csv(index=False, encoding='utf-8-sig')
+    output.write(csv_data.encode('utf-8-sig'))
     output.seek(0)
+
     return output
 
 
 async def create_chart(candidates: List[Dict], contest_name: str) -> io.BytesIO:
-    """Grafik yaratish"""
     output = io.BytesIO()
 
     names = [c['candidate_name'] for c in candidates]
@@ -232,7 +156,6 @@ async def create_chart(candidates: List[Dict], contest_name: str) -> io.BytesIO:
     fig, ax = plt.subplots(figsize=(10, 6))
     bars = ax.barh(names, votes, color='#3498db')
 
-    # Ranglar
     if len(bars) > 0:
         bars[0].set_color('#FFD700')  # Oltin
     if len(bars) > 1:
@@ -244,7 +167,6 @@ async def create_chart(candidates: List[Dict], contest_name: str) -> io.BytesIO:
     ax.set_title(f'📊 {contest_name}', fontsize=14, fontweight='bold')
     ax.grid(axis='x', alpha=0.3)
 
-    # Qiymatlarni ko'rsatish
     for i, (name, vote) in enumerate(zip(names, votes)):
         ax.text(vote + 0.5, i, str(vote), va='center', fontsize=10)
 
@@ -257,21 +179,6 @@ async def create_chart(candidates: List[Dict], contest_name: str) -> io.BytesIO:
 
 
 def parse_datetime(date_str: str) -> datetime:
-    """
-    String'dan datetime'ga o'tkazish (Toshkent → UTC)
-
-    User Toshkent vaqtida kiritadi, database UTC da saqlaydi
-
-    Args:
-        date_str: Sana string formatda (DD.MM.YYYY HH:MM)
-
-    Returns:
-        UTC datetime
-
-    Example:
-        Input:  "29.01.2026 15:00" (Toshkent vaqti)
-        Output: 2026-01-29 10:00 (UTC -5)
-    """
     formats = [
         "%d.%m.%Y %H:%M",
         "%d/%m/%Y %H:%M",
@@ -283,39 +190,16 @@ def parse_datetime(date_str: str) -> datetime:
 
     for fmt in formats:
         try:
-            # Parse (Toshkent vaqti)
-            tashkent_dt = datetime.strptime(date_str, fmt)
-
-            # UTC ga convert (-5 soat)
-            utc_dt = tashkent_dt - timedelta(hours=5)
-
-            return utc_dt
-
+            return datetime.strptime(date_str, fmt)
         except ValueError:
             continue
 
     raise ValueError(f"Sana formati noto'g'ri: {date_str}")
 
 
-def get_current_datetime() -> datetime:
-    """
-    Joriy UTC vaqtni olish
-
-    Returns:
-        UTC datetime
-
-    Example:
-        Server UTC da: 10:00
-        Returns: 2026-01-29 10:00 (UTC)
-    """
-    return datetime.utcnow()
-
-
 def validate_channel_link(link: str) -> bool:
-    """Kanal linkini tekshirish"""
     return link.startswith('https://t.me/') or link.startswith('@')
 
 
 def log_user_action(user_id: int, username: str, action: str):
-    """Foydalanuvchi harakatini loglash"""
     logger.info(f"User: {user_id} (@{username}) - Action: {action}")
