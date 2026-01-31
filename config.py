@@ -67,4 +67,4 @@ CHANNEL_LINK = os.getenv("CHANNEL_LINK", "")
 # OVOZ BERISH SOZLAMALARI
 # ============================================
 MAX_VOTES_PER_USER = 1  # Har bir foydalanuvchi bitta ovoz beradi
-RATE_LIMIT_SECONDS = 0.01  # Spam himoyasi uchun
+RATE_LIMIT_SECONDS = 1  # Spam himoyasi uchun
