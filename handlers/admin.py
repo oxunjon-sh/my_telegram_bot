@@ -559,37 +559,41 @@ async def process_candidate_name(message: Message, state: FSMContext, db: Databa
 # ==================== PREVIEW VA TASDIQLASH ====================
 
 async def show_contest_preview(message: Message, state: FSMContext, db: Database):
-    """
-    Kanalga post qilishdan oldin konkursni ko'rsatish va tasdiqlash
-    """
     data = await state.get_data()
 
-    # Preview matni
-    text = f"""
-📋 <b>KONKURS TAYYORLANDI!</b>
+    # ❌ ESKI (noto'g'ri):
+    # text = f"""
+    # 📋 <b>KONKURS TAYYORLANDI!</b>
+    # ...
+    # """
 
-<b>📝 Nom:</b> {data['contest_name']}
-<b>🖼 Rasm:</b> {'✅ Bor' if data.get('contest_image') else '❌ Yo\'q'}
-<b>📅 Boshlanish:</b> {format_datetime(data['start_date'])}
-<b>⏰ Tugash:</b> {format_datetime(data['end_date'])}
-<b>📢 Kanallar:</b> {len(data.get('channels', []))} ta
-<b>👥 Nomzodlar:</b> {len(data['candidates'])} ta
+    # ✅ YANGI (to'g'ri):
+    text = (
+        f"📋 <b>KONKURS TAYYORLANDI!</b>\n\n"
+        f"<b>📝 Nom:</b> {data['contest_name']}\n"
+    )
 
-<b>Nomzodlar:</b>
-"""
+    image_status = '✅ Bor' if data.get('contest_image') else '❌ Yoq'
+    text += f"<b>🖼 Rasm:</b> {image_status}\n"
+
+    text += (
+        f"<b>📅 Boshlanish:</b> {format_datetime(data['start_date'])}\n"
+        f"<b>⏰ Tugash:</b> {format_datetime(data['end_date'])}\n"
+        f"<b>📢 Kanallar:</b> {len(data.get('channels', []))} ta\n"
+        f"<b>👥 Nomzodlar:</b> {len(data['candidates'])} ta\n\n"
+        f"<b>Nomzodlar:</b>\n"
+    )
 
     for i, cand in enumerate(data['candidates'], 1):
-        text += f"{i}. {cand['name']}" + "\n"
+        text += f"{i}. {cand['name']}\n"
 
     text += "\n❓ <b>Kanalga post qilishni tasdiqlaysizmi?</b>"
 
-    # Tasdiqlash tugmalari
     kb = InlineKeyboardBuilder()
     kb.button(text="✅ Ha, kanalga post qiling", callback_data="confirm_post_to_channel")
     kb.button(text="❌ Yo'q, bekor qiling", callback_data="cancel_contest_posting")
     kb.adjust(1)
 
-    # Agar rasm bor bo'lsa, rasm bilan ko'rsatish
     if data.get('contest_image'):
         await message.answer_photo(
             photo=data['contest_image'],
@@ -600,7 +604,6 @@ async def show_contest_preview(message: Message, state: FSMContext, db: Database
         await message.answer(text, reply_markup=kb.as_markup())
 
     await state.set_state(AdminStates.confirm_contest)
-
 
 @router.callback_query(F.data == "confirm_post_to_channel")
 @admin_only
