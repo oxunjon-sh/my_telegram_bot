@@ -32,4 +32,4 @@ CHANNEL_LINK = os.getenv("CHANNEL_LINK", "")  # Masalan: https://t.me/mychannel
 
 # Ovoz berish sozlamalari
 MAX_VOTES_PER_USER = 1  # Har bir foydalanuvchi bitta ovoz beradi
-RATE_LIMIT_SECONDS = 0.03  # Spam himoyasi uchun
+RATE_LIMIT_SECONDS = 0.1  # Spam himoyasi uchun
