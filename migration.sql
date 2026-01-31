@@ -1,155 +1,145 @@
+-- ============================================
+-- DATABASE OPTIMIZATION & FIXES
+-- ============================================
 
-CREATE TABLE IF NOT EXISTS contests (
-    id SERIAL PRIMARY KEY,
-    name VARCHAR(255) NOT NULL,
-    description TEXT,
-    image_file_id VARCHAR(255),
-    start_date TIMESTAMP NOT NULL,
-    end_date TIMESTAMP NOT NULL,
-    is_active BOOLEAN DEFAULT TRUE,
-    is_archived BOOLEAN DEFAULT FALSE,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
+-- 1. VARCHAR(255) → TEXT (konkurs va nomzod nomlari uchun)
+-- ============================================
+ALTER TABLE contests ALTER COLUMN name TYPE TEXT;
+ALTER TABLE candidates ALTER COLUMN name TYPE TEXT;
+ALTER TABLE candidates ALTER COLUMN description TYPE TEXT;
 
-COMMENT ON TABLE contests IS 'Ovoz berish konkurslari';
-COMMENT ON COLUMN contests.name IS 'Konkurs nomi';
-COMMENT ON COLUMN contests.description IS 'Konkurs tavsifi (ixtiyoriy)';
-COMMENT ON COLUMN contests.image_file_id IS 'Telegram fayl ID (rasm)';
-COMMENT ON COLUMN contests.start_date IS 'Konkurs boshlanish sanasi';
-COMMENT ON COLUMN contests.end_date IS 'Konkurs tugash sanasi';
-COMMENT ON COLUMN contests.is_active IS 'Konkurs faol/faol emas';
-COMMENT ON COLUMN contests.is_archived IS 'Konkurs arxivlangan';
+-- 2. TIMEZONE sozlash (UTC)
+-- ============================================
+ALTER DATABASE voting_bot_db SET timezone = 'UTC';
 
--- -------------------- KANAL TALABLARI JADVALI --------------------
-CREATE TABLE IF NOT EXISTS contest_channels (
-    id SERIAL PRIMARY KEY,
-    contest_id INTEGER NOT NULL REFERENCES contests(id) ON DELETE CASCADE,
-    channel_id VARCHAR(100) NOT NULL,
-    channel_name VARCHAR(255),
-    channel_link TEXT NOT NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
+-- 3. PERFORMANCE TUNING (400-500k users uchun)
+-- ============================================
 
-COMMENT ON TABLE contest_channels IS 'Konkurs uchun talab qilinadigan kanallar';
-COMMENT ON COLUMN contest_channels.channel_id IS 'Telegram kanal chat ID';
-COMMENT ON COLUMN contest_channels.channel_name IS 'Kanal nomi';
-COMMENT ON COLUMN contest_channels.channel_link IS 'Kanal linki (https://t.me/...)';
+-- Connection pooling settings
+ALTER SYSTEM SET max_connections = 200;
+ALTER SYSTEM SET shared_buffers = '256MB';
+ALTER SYSTEM SET effective_cache_size = '1GB';
+ALTER SYSTEM SET work_mem = '16MB';
+ALTER SYSTEM SET maintenance_work_mem = '128MB';
 
--- -------------------- NOMZODLAR JADVALI --------------------
-CREATE TABLE IF NOT EXISTS candidates (
-    id SERIAL PRIMARY KEY,
-    contest_id INTEGER NOT NULL REFERENCES contests(id) ON DELETE CASCADE,
-    name VARCHAR(255) NOT NULL,
-    description TEXT,
-    position INTEGER DEFAULT 0,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
+-- 4. OPTIMIZED INDEXES
+-- ============================================
 
-COMMENT ON TABLE candidates IS 'Konkurs nomzodlari';
-COMMENT ON COLUMN candidates.name IS 'Nomzod ismi';
-COMMENT ON COLUMN candidates.description IS 'Nomzod haqida (ixtiyoriy)';
-COMMENT ON COLUMN candidates.position IS 'Nomzodning tartibi (sort uchun)';
+-- Votes jadali uchun (eng muhim!)
+DROP INDEX IF EXISTS idx_votes_contest;
+DROP INDEX IF EXISTS idx_votes_candidate;
+DROP INDEX IF EXISTS idx_votes_user;
+DROP INDEX IF EXISTS idx_votes_contest_user;
+DROP INDEX IF EXISTS idx_votes_created;
 
--- -------------------- OVOZLAR JADVALI --------------------
-CREATE TABLE IF NOT EXISTS votes (
-    id SERIAL PRIMARY KEY,
-    contest_id INTEGER NOT NULL REFERENCES contests(id) ON DELETE CASCADE,
-    candidate_id INTEGER NOT NULL REFERENCES candidates(id) ON DELETE CASCADE,
-    user_id BIGINT NOT NULL,
-    username VARCHAR(255),
-    voted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(contest_id, user_id)
-);
+-- COMPOUND indexes (katta hajm uchun)
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_votes_contest_candidate
+    ON votes(contest_id, candidate_id);
 
-COMMENT ON TABLE votes IS 'Foydalanuvchilar ovozlari';
-COMMENT ON COLUMN votes.user_id IS 'Telegram user ID';
-COMMENT ON COLUMN votes.username IS 'Telegram username';
-COMMENT ON COLUMN votes.voted_at IS 'Ovoz berilgan vaqt';
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_votes_contest_user_unique
+    ON votes(contest_id, user_id);
 
--- -------------------- FOYDALANUVCHILAR JADVALI --------------------
-CREATE TABLE IF NOT EXISTS users (
-    user_id BIGINT PRIMARY KEY,
-    username VARCHAR(255),
-    first_name VARCHAR(255),
-    last_name VARCHAR(255),
-    last_action TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_votes_candidate_count
+    ON votes(candidate_id) WHERE contest_id IS NOT NULL;
 
-COMMENT ON TABLE users IS 'Bot foydalanuvchilari (rate limiting uchun)';
-COMMENT ON COLUMN users.last_action IS 'Oxirgi faollik vaqti (spam himoyasi)';
+-- Contests jadali uchun
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_contests_active_dates
+    ON contests(is_active, is_archived, start_date, end_date)
+    WHERE is_active = TRUE;
 
--- Contests jadvaliga yangi ustunlar qo'shish
-ALTER TABLE contests 
-ADD COLUMN IF NOT EXISTS channel_chat_id VARCHAR(100);
+-- Candidates jadali uchun
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_candidates_contest_position
+    ON candidates(contest_id, position);
 
-ALTER TABLE contests 
-ADD COLUMN IF NOT EXISTS channel_post_message_id INTEGER;
+-- Users jadali uchun
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_users_id_action
+    ON users(user_id, last_action);
 
-COMMENT ON COLUMN contests.channel_chat_id IS 'Kanalning chat ID (bitta kanal uchun)';
-COMMENT ON COLUMN contests.channel_post_message_id IS 'Post message ID (bitta kanal uchun)';
+-- 5. MATERIALIZED VIEW (Real-time ovozlar uchun)
+-- ============================================
+DROP MATERIALIZED VIEW IF EXISTS vote_counts_cache;
 
--- Contest_channels jadvaliga yangi ustun qo'shish (ko'p kanalli versiya)
-ALTER TABLE contest_channels 
-ADD COLUMN IF NOT EXISTS posted_message_id INTEGER;
+CREATE MATERIALIZED VIEW vote_counts_cache AS
+SELECT
+    contest_id,
+    candidate_id,
+    COUNT(*) as vote_count,
+    MAX(voted_at) as last_vote_time
+FROM votes
+GROUP BY contest_id, candidate_id;
 
-COMMENT ON COLUMN contest_channels.posted_message_id IS 'Har bir kanalga yuborilgan post message ID';
+-- Index on materialized view
+CREATE INDEX idx_vote_counts_contest
+    ON vote_counts_cache(contest_id);
+CREATE INDEX idx_vote_counts_candidate
+    ON vote_counts_cache(candidate_id);
 
-
-CREATE INDEX IF NOT EXISTS idx_votes_contest
-ON votes(contest_id);
-
-CREATE INDEX IF NOT EXISTS idx_votes_candidate 
-ON votes(candidate_id);
-
-CREATE INDEX IF NOT EXISTS idx_votes_user 
-ON votes(user_id);
-
-CREATE INDEX IF NOT EXISTS idx_votes_contest_user 
-ON votes(contest_id, user_id);
-
-CREATE INDEX IF NOT EXISTS idx_votes_created 
-ON votes(voted_at);
-
-CREATE INDEX IF NOT EXISTS idx_contests_active
-ON contests(is_active, is_archived);
-
-CREATE INDEX IF NOT EXISTS idx_contests_dates 
-ON contests(start_date, end_date);
-
-CREATE INDEX IF NOT EXISTS idx_candidates_contest 
-ON candidates(contest_id);
-
-CREATE INDEX IF NOT EXISTS idx_candidates_position 
-ON candidates(position);
-
-CREATE INDEX IF NOT EXISTS idx_channels_contest
-ON contest_channels(contest_id);
-
-CREATE INDEX IF NOT EXISTS idx_channel_posts 
-ON contest_channels(contest_id, posted_message_id) 
-WHERE posted_message_id IS NOT NULL;
-
-CREATE INDEX IF NOT EXISTS idx_users_last_action
-ON users(last_action);
-
-DO $$ 
+-- Refresh function
+CREATE OR REPLACE FUNCTION refresh_vote_counts()
+RETURNS TRIGGER AS $$
 BEGIN
-    RAISE NOTICE '============================================================';
-    RAISE NOTICE 'MIGRATSIYA MUVAFFAQIYATLI TUGADI!';
-    RAISE NOTICE '============================================================';
-    RAISE NOTICE '';
-    RAISE NOTICE 'Jadvallar yaratildi:';
-    RAISE NOTICE '  ✅ contests';
-    RAISE NOTICE '  ✅ contest_channels';
-    RAISE NOTICE '  ✅ candidates';
-    RAISE NOTICE '  ✅ votes';
-    RAISE NOTICE '  ✅ users';
-    RAISE NOTICE '';
-    RAISE NOTICE 'Indexlar yaratildi: 11 ta';
-    RAISE NOTICE '';
-    RAISE NOTICE 'Endi botni ishga tushirishingiz mumkin:';
-    RAISE NOTICE '  python bot.py';
-    RAISE NOTICE '';
-    RAISE NOTICE '============================================================';
-END $$;
+    REFRESH MATERIALIZED VIEW CONCURRENTLY vote_counts_cache;
+    RETURN NULL;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Trigger (auto-refresh on vote)
+DROP TRIGGER IF EXISTS trigger_refresh_vote_counts ON votes;
+CREATE TRIGGER trigger_refresh_vote_counts
+    AFTER INSERT OR DELETE ON votes
+    FOR EACH STATEMENT
+    EXECUTE FUNCTION refresh_vote_counts();
+
+-- 6. PARTITIONING (future-proof, 1M+ votes uchun)
+-- ============================================
+-- Hozircha kerak emas, lekin kelajakda qo'shish mumkin
+-- CREATE TABLE votes_2026 PARTITION OF votes
+--     FOR VALUES FROM ('2026-01-01') TO ('2027-01-01');
+
+-- 7. VACUUM & ANALYZE
+-- ============================================
+VACUUM ANALYZE votes;
+VACUUM ANALYZE contests;
+VACUUM ANALYZE candidates;
+VACUUM ANALYZE users;
+
+-- 8. STATISTICS
+-- ============================================
+ALTER TABLE votes ALTER COLUMN contest_id SET STATISTICS 1000;
+ALTER TABLE votes ALTER COLUMN candidate_id SET STATISTICS 1000;
+ALTER TABLE votes ALTER COLUMN user_id SET STATISTICS 1000;
+
+-- ============================================
+-- VERIFICATION QUERIES
+-- ============================================
+
+-- Check table sizes
+SELECT
+    schemaname,
+    tablename,
+    pg_size_pretty(pg_total_relation_size(schemaname||'.'||tablename)) AS size
+FROM pg_tables
+WHERE schemaname = 'public'
+ORDER BY pg_total_relation_size(schemaname||'.'||tablename) DESC;
+
+-- Check indexes
+SELECT
+    tablename,
+    indexname,
+    indexdef
+FROM pg_indexes
+WHERE schemaname = 'public'
+ORDER BY tablename, indexname;
+
+-- Check performance stats
+SELECT
+    schemaname,
+    tablename,
+    seq_scan,
+    idx_scan,
+    n_tup_ins,
+    n_tup_upd,
+    n_tup_del
+FROM pg_stat_user_tables
+WHERE schemaname = 'public'
+ORDER BY tablename;

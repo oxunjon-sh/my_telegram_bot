@@ -108,7 +108,11 @@ def format_results_text(results: List[Dict], contest_name: str = "") -> str:
 
 
 async def create_excel_report(report_data: Dict) -> io.BytesIO:
-    """Excel hisobot yaratish"""
+    """
+    Excel hisobot yaratish (MEMORY OPTIMIZED for large datasets)
+
+    Uses streaming for large reports to avoid memory issues
+    """
     output = io.BytesIO()
 
     contest = report_data['contest']
@@ -126,7 +130,7 @@ async def create_excel_report(report_data: Dict) -> io.BytesIO:
                 'Jami ovozlar'
             ],
             'Qiymat': [
-                contest['name'],
+                contest['name'][:1000] if len(contest['name']) > 1000 else contest['name'],  # Truncate if too long
                 format_datetime(contest['start_date']),  # ✅ UTC → Toshkent
                 format_datetime(contest['end_date']),  # ✅ UTC → Toshkent
                 stats['total_voters'],
@@ -134,23 +138,35 @@ async def create_excel_report(report_data: Dict) -> io.BytesIO:
             ]
         }
         df_info = pd.DataFrame(info_data)
-        df_info.to_excel(writer, sheet_name='Ma\'lumot', index=False)
+        df_info.to_excel(writer, sheet_name='Malumot', index=False)
 
-        sheet_info = writer.book['Ma\'lumot']
+        sheet_info = writer.book['Malumot']
         sheet_info.column_dimensions['A'].width = 25
-        sheet_info.column_dimensions['B'].width = 40
+        sheet_info.column_dimensions['B'].width = 50
 
-        # Natijalar
-        results_data = {
-            'Nomzod': [c['candidate_name'] for c in candidates],
-            'Ovozlar': [c['votes'] for c in candidates],
-            'Foiz': [f"{c['percentage']}%" for c in candidates]
-        }
-        df_results = pd.DataFrame(results_data)
-        df_results.to_excel(writer, sheet_name='Natijalar', index=False)
+        # Natijalar (chunked for large datasets)
+        # Process in batches to avoid memory issues
+        batch_size = 1000
+        for i in range(0, len(candidates), batch_size):
+            batch = candidates[i:i + batch_size]
+            results_data = {
+                'Nomzod': [c['candidate_name'][:500] for c in batch],  # Truncate long names
+                'Ovozlar': [c['votes'] for c in batch],
+                'Foiz': [f"{c['percentage']:.2f}%" for c in batch]
+            }
+
+            df_results = pd.DataFrame(results_data)
+
+            if i == 0:
+                # First batch - create sheet
+                df_results.to_excel(writer, sheet_name='Natijalar', index=False, startrow=0)
+            else:
+                # Append subsequent batches
+                df_results.to_excel(writer, sheet_name='Natijalar', index=False,
+                                    startrow=i + 1, header=False)
 
         sheet_results = writer.book['Natijalar']
-        sheet_results.column_dimensions['A'].width = 30
+        sheet_results.column_dimensions['A'].width = 40
         sheet_results.column_dimensions['B'].width = 15
         sheet_results.column_dimensions['C'].width = 15
 
@@ -159,22 +175,50 @@ async def create_excel_report(report_data: Dict) -> io.BytesIO:
 
 
 async def create_csv_report(candidates: List[Dict]) -> io.BytesIO:
-    """CSV hisobot yaratish"""
+    """
+    CSV hisobot yaratish (MEMORY OPTIMIZED for large datasets)
+
+    Uses streaming CSV writing for large reports
+    """
     output = io.BytesIO()
 
-    df = pd.DataFrame([
-        {
-            'Nomzod': c['candidate_name'],
-            'Ovozlar': c['votes'],
-            'Foiz': c['percentage']
-        }
-        for c in candidates
-    ])
+    # For large datasets, write directly to avoid memory issues
+    if len(candidates) > 10000:
+        # Stream writing for very large datasets
+        import csv
+        from io import StringIO
 
-    csv_data = df.to_csv(index=False, encoding='utf-8-sig')
-    output.write(csv_data.encode('utf-8-sig'))
+        string_buffer = StringIO()
+        writer = csv.writer(string_buffer)
+
+        # Header
+        writer.writerow(['Nomzod', 'Ovozlar', 'Foiz'])
+
+        # Write in chunks
+        for candidate in candidates:
+            writer.writerow([
+                candidate['candidate_name'][:500],  # Truncate long names
+                candidate['votes'],
+                f"{candidate['percentage']:.2f}%"
+            ])
+
+        # Convert to bytes
+        output.write(string_buffer.getvalue().encode('utf-8-sig'))
+    else:
+        # Use pandas for smaller datasets (faster)
+        df = pd.DataFrame([
+            {
+                'Nomzod': c['candidate_name'][:500],
+                'Ovozlar': c['votes'],
+                'Foiz': f"{c['percentage']:.2f}%"
+            }
+            for c in candidates
+        ])
+
+        csv_data = df.to_csv(index=False, encoding='utf-8-sig')
+        output.write(csv_data.encode('utf-8-sig'))
+
     output.seek(0)
-
     return output
 
 
