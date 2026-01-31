@@ -18,7 +18,6 @@ class VotingStates(StatesGroup):
     selecting_candidate = State()
     confirming_vote = State()
 
-
 async def update_channel_post(bot, db: Database, contest_id: int):
 
     try:
