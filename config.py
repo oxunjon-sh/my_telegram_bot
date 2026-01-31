@@ -9,7 +9,7 @@ BOT_TOKEN = os.getenv('BOT_TOKEN')
 
 # Database sozlamalari
 DB_CONFIG = {
-    'host': os.getenv('DB_HOST', 'localhost'),
+    'host': os.getenv('DB_HOST', 'db'),
     'port': int(os.getenv('DB_PORT', 5432)),
     'database': os.getenv('DB_NAME', 'voting_bot'),
     'user': os.getenv('DB_USER', 'postgres'),
